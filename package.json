@@ -1,0 +1,13 @@
+{
+  "name": "make-images-master",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "dependencies": {
+    "colors": "^1.4.0",
+    "sharp": "^0.25.4"
+  },
+  "scripts": {
+    "start": "node make-images"
+  }
+}
