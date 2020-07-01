@@ -8,6 +8,7 @@
     "sharp": "^0.25.4"
   },
   "scripts": {
-    "start": "node make-images"
+    "start": "node make-images",
+    "serve": "node server"
   }
 }

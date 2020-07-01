@@ -1,26 +1,35 @@
-// Types to transcode to
+// Supported types to transcode to (svg is another but unuseful here)
 const TYPE_JPG = "jpg"
 const TYPE_WEBP = "webp"
 const TYPE_PNG = "png"
 const TYPE_GIF = "gif"
 
 // Libs
-const fs = require("fs")
 const sharp = require("sharp")
 const path = require('path')
 const colors = require('colors')
+const fs = require("fs")
 const { readdir } = fs.promises
 
-const createFilename = (name,w,h,type) => {
-    const dimensions = w && h ? `${w}x${h}` : h && !w ? `${h}` : w
-    return `${name}-${dimensions}.${type}`
+// just a console.log wrapper and saver
+const log = () => {
+
+}
+
+// TODO: Add a way to override this method or proxy the args
+const createFilename = (name,w,h,type, size=null) => {
+    if (size)
+    {
+        return `${name}@${size}x.${type}`
+    }else{
+        const dimensions = w && h ? `${w}x${h}` : h && !w ? `${h}` : w
+        return `${name}-${dimensions}.${type}`
+    }
 }
 
 /*
 WEB P
 options Object ? output options
-options.quality number 
-quality, integer 1-100 (optional, default 80)
 options.alphaQuality number
 quality of alpha layer, integer 0-100 (optional, default 100)
 options.nearLossless boolean
@@ -43,7 +52,13 @@ const defaultOptions = {
     // use lossless compression mode (optional, default false)
     lossless : false,
     // If an image shrinks below it's size, how to pad out the remainer
-    background : { r: 255, g: 255, b: 255, alpha: 0 }
+    background : { r: 255, g: 255, b: 255, alpha: 0 },
+}
+
+// Use null or undefined to auto-scale the height to match the width.
+const defaultSize = {
+    width:null,
+    height:null
 }
 
 // This is the magic function
@@ -53,14 +68,18 @@ const defaultOptions = {
 const convertImage = async function(
         file, 
         types = [ TYPE_WEBP, TYPE_JPG ],
-        sizes = [ {width:500}, {width:100}, {size:2} ],
+        sizes = [ {} ],
         settings = {} 
     ) {
         
     const options = Object.assign( {}, defaultOptions, settings )
 
     // work out original name without suffix or path
+    // use path tool in case the file name is in the wrong format...
+    file = path.normalize(file)
+
     const name = path.basename( file, path.extname(file) )
+    const filePath = path.dirname(file)
 
     // create promises for all the variants and store them in here
     const promises = []
@@ -75,23 +94,72 @@ const convertImage = async function(
     const metadata = await sharpStream.metadata()
     const aspectRatio = metadata.width / metadata.height
  
+    // if the "types" provided are as a single string rather than an array
+    // assume the user meant a single type and create the array from it
+    if (!types)
+    {
+        types = [metadata.format]
+    }else if ( !Array.isArray(types) ){
+        types = [types]
+    }
+
     // TODO: LOOP
     //console.log("Converting", file, types, name)
     for (let d in sizes)
     {        
-        const dimensions = sizes[d]
+        const size = sizes[d]
+
+        // if we have both dimensions, we do not need to do clever scaling
+        const hasBothDimensions = size.hasOwnProperty("width") && size.hasOwnProperty("height")
+
+        // If there are no dimensions supplied, simply do not resize
+        //const dimensions = sizes[d]
+        const dimensions = Object.assign( {}, defaultSize, size )
+        // Use null or undefined to auto-scale the height to match the width.
+        // || { width:metadata.width, height:metadata.height }
         
-        // if there is a size in the dimensions...
-        if (dimensions.hasOwnProperty("size"))
+        // if there is a size in the dimensions always use the original dimension if not set...
+        if (dimensions.hasOwnProperty("size") && !isNaN( parseFloat( dimensions.size ) ) )
         {
+            // if neither are set use the originals...
+            if (!dimensions.width && !dimensions.height)
+            {
+                // neither specified
+                dimensions.width = metadata.width * dimensions.size
+                dimensions.height = metadata.height * dimensions.size
+           
+            }else if (dimensions.width && dimensions.height){
+
+                // if both the width and height are specified
+                dimensions.width *= dimensions.size
+                dimensions.height *= dimensions.size
+        
+            }else if (dimensions.width && !dimensions.height){
+                
+                // if the width is specified but not the height...
+                // determine the height from the width and aspect ratio
+                dimensions.width *= dimensions.size
+                dimensions.height = dimensions.width / aspectRatio    
+            
+            }else if (!dimensions.width && dimensions.height){
+                
+                // if the width is specified but not the height...
+                // determine the height from the width and aspect ratio
+                dimensions.height *= dimensions.size
+                dimensions.width = dimensions.height * aspectRatio   
+            }
+
+            // if a size is specified we use the new size otherwise we use the other size as reference
             dimensions.width = dimensions.width ? dimensions.width * dimensions.size : metadata.width * dimensions.size
             dimensions.height = dimensions.height ? dimensions.height * dimensions.size : metadata.height * dimensions.size
         }
         
+        // console.error("dimensions",dimensions, 'hasBothDimensions',hasBothDimensions)
         const sharpOptions = {
 
             // set the dimensions
-            ...dimensions,
+            width:Math.floor(dimensions.width),
+            height:Math.floor(dimensions.height),
            
             // sharp.fit.cover: (default) Preserving aspect ratio, ensure the image covers both provided dimensions by cropping/clipping to fit.
             // sharp.fit.contain: Preserving aspect ratio, contain within both provided dimensions using "letterboxing" where necessary.
@@ -115,6 +183,8 @@ const convertImage = async function(
 
             background: options.background
         }
+
+        // console.error("dims",sizes[d], dimensions, sharpOptions)
         
         // resize the stream.clone()
         const resizedStream = await sharpStream.resize(sharpOptions)
@@ -123,19 +193,17 @@ const convertImage = async function(
         // If we want to use something from the metadata we will have to wait...  
         const resizedMeta = await resizedStream.metadata()
         
-        console.log( "resizedStream : metadata", resizedMeta, "aspectRatio", aspectRatio, "dimensions", dimensions )
+        //console.log( "resizedStream : metadata", resizedMeta, "aspectRatio", aspectRatio, "dimensions", dimensions )
         
         // now loop through the types
-        for ( let t in types)
+        for ( let t in types )
         {
             const type = types[t].toLowerCase()
-            const filename = createFilename( name, resizedMeta.width, resizedMeta.height, type)
-            const filePath = path.dirname(file)
+            const filename = createFilename( name, resizedMeta.width, resizedMeta.height, type, dimensions.size)
             const destination = path.join( options.destination, filePath, filename )
             const resizedStreamClone = resizedStream.clone()        
         
-            console.log("Destination", destination)
-
+            // console.log("Destination", destination)
             filenames.push( filename )
 
             switch( type )
@@ -153,13 +221,17 @@ const convertImage = async function(
                 case TYPE_PNG:
                     promises.push( resizedStreamClone.png(options).toFile(destination) )
                     break
+
+                case TYPE_GIF:
+                    promises.push( resizedStreamClone.gif(options).toFile(destination) )
+                    break
             }
 
             //console.log(">", type, filename, promises[promises.length-1] )
         }  
 
     }
-    console.log( `Ready to encode`.green + ` `.green + ` ${sizes.length} sizes `.green.inverse  +  ` into `.green + ` ${types.join(' & ')} `.green.inverse + ` types, resulting in `.green + ` ${promises.length} images `.green.inverse )
+    console.log( `Ready to encode`.green + ` `.green + ` ${sizes.length} sizes `.green.inverse  +  ` into `.green + ` ${types.length} type (${types.join(' & ')}) `.green.inverse + ` types, resulting in `.green + ` ${promises.length} new images `.green.inverse )
 
     // Create a pipeline that will download an image, resize it and format it to different files
     // Using Promises to know when the pipeline is complete
@@ -167,10 +239,13 @@ const convertImage = async function(
         .then(res => { 
             // combine the outputs with the filenames
             const results = res.map( (result, index) => {
+                const folder = path.join( options.destination, filePath )
                 return {
                     ...metadata,
                     ...result,
                     name:filenames[index],
+                    folder:folder,
+                    path:path.join( folder, filenames[index] ),
                     file:file
                 }
             })
@@ -199,7 +274,7 @@ const convertImage = async function(
 async function readFolder(
     folder = './images', 
     subfolders = true,
-    ALLOWED_TYPES = [".gif",".jpg",".png",".jpeg",".webp",".svg",".raw",".bmp", ".tiff"]
+    ALLOWED_TYPES = [".gif",".jpg",".png",".apng",".jpeg",".webp",".svg",".raw",".bmp", ".tiff", ".ico"]
 ){
     const folderContents = await readdir(folder , {withFileTypes: true})
     const files = await Promise.all( folderContents.map( async (file) =>{
@@ -208,7 +283,6 @@ async function readFolder(
        
         if (file.isDirectory())
         {
-            // this is a directory!
             //console.log( "dir", file, location  )
             return await readFolder( location, subfolders, ALLOWED_TYPES )
             
@@ -283,49 +357,208 @@ const convertFolder = (
     })
 }
 
+// const createIMG = async function(src, width=100, alt="", settings={importance:"auto", loading:"eager", decoding:"auto"} ) {
+   
 
+// Indicates the relative download importance of the resource. Priority hints allow the values:
+// auto: no preference. The browser may use its own heuristics to prioritize the image.
+// high: the image is of high priority.
+// low: the image is of low priority.
 
-// TESTS! ///////////////////////////////////////////////////////////////////
+// loading : eager / lazy
 
-// readFolder("./images", true).then(r=>console.log("ARGH!",r))
+// sizes :
+// srcset :
 
-const f = './images-big/img_2048x1152_3x16bit_xxB_bars_45deg_bltr_0008.png'
-
-// console.log(`${f}`.green); // outputs green text
-// console.log('i like cake and pies'.underline.red) // outputs red underlined text
-// console.log('inverse the color'.inverse); // inverses the color
-// console.log('OMG Rainbows!'.rainbow); // rainbow
-
-// convertImage(f).then( p=>{        
-//     console.log( `${f} image(s) converted to`.green )
-//     console.log( p )
-// })
-
-
-convertFolder( "./images" , {
-    sizes : [ {width:500}, {width:100} ],
-    types : [ TYPE_WEBP, TYPE_JPG, TYPE_PNG ]
-}, ({progress, filename, data}) =>{
-
-    console.log( `Finished! ${Math.round(progress*100)}% `.inverse + ` ${filename}` )
-    return data
-})
-
-/*
+// decoding : 
+// sync - Decode the image synchronously, for atomic presentation with other content.
+// async - Decode the image asynchronously, to reduce delay in presenting other content.
+// auto - Default: no preference for the decoding mode. The browser decides what is best for the user.
 // TODO: Just an easy way to use the output images...
-const createIMG = (src, alt) => {
+const createIMG = async function(src, width=100, alt="", settings={importance:"auto", loading:"eager", decoding:"auto"} ) {
+
+    const sharpStream = sharp( src, {} )
     
-    return `<img src="${src}" alt="${alt}" >`
+    // first fetch the size...
+    const metadata = await sharpStream.metadata()
+    const aspectRatio = metadata.width / metadata.height
+    const format = metadata.format
+
+    // check the requested size and see how many DPIs we can create...
+    const originalWidth = metadata.width
+    const scales = Math.floor( originalWidth / parseFloat(width) )
+    const srcSets = []
+    const sizes = []
+
+    const limit = scales > 4 ? 4 : scales;
+
+    for (let i=1; i<limit; ++i)
+    {
+        sizes.push({width:width, size:i})
+    }
+
+    console.log(`convertImage( ${f}, ${format}, 
+                    ${JSON.stringify(sizes)}, 
+                    ${JSON.stringify(settings)}
+                )`)
+    
+    // take the source and create our resized versions
+    return convertImage(f, format, sizes, settings).then( images =>{        
+        // console.log( `${f} image(s) converted to`.green )
+        // loop through images
+        // or just skip straight to making the DPIs...
+        // loop through scales and create our new sizes?
+        images.forEach( (image,index) => {
+            const dimensions = sizes[index]
+            srcSets.push( `${image.path} ${dimensions.size}x` )
+        })
+
+        const srcset = srcSets.join(", ") // "two.png 2x, three.png 3x, four.png 4x"
+        const height = Math.floor( width * aspectRatio )
+                
+        return (
+`<img 
+    src="${src}" 
+    alt="${alt}"
+    width="${width}"
+    height="${height}"
+    decoding="${settings.decoding}"
+    importance="${settings.importance}"
+    loading="${settings.loading}" 
+    srcset="${srcset}"
+>`)
+    } ).catch( error => reject(error))
 }
+
+
+
+// This is a modifier that spits out attributes as an array
+// but doesn't add the extra img tags
+const createSourceAttributes = async function(src, width=100, format=TYPE_WEBP, options={} ) {
+ 
+    const sharpStream = sharp( src, {} )
+    
+    // first fetch the size...
+    const metadata = await sharpStream.metadata()
+    const aspectRatio = metadata.width / metadata.height
+
+    // check the requested size and see how many DPIs we can create...
+    const originalWidth = metadata.width
+    const scales = Math.floor( originalWidth / parseFloat(width) )
+    const limit = scales > 4 ? 4 : scales;
+    const srcSets = []
+    const sizes = []
+    
+    for (let i=1; i<limit; ++i)
+    {
+        sizes.push({width:width, size:i})
+    }
+    
+    // take the source and create our resized versions
+    return convertImage(f, format, sizes, options).then( images =>{        
+        // console.log( `${f} image(s) converted to`.green )
+        // loop through images
+        // or just skip straight to making the DPIs...
+        // loop through scales and create our new sizes?
+        images.forEach( (image,index) => {
+            const dimensions = sizes[index]
+            srcSets.push( `${image.path} ${dimensions.size}x` )
+        })
+        const srcset = srcSets.join(", ")
+        return {
+            src:src,
+            width:width,
+            height:Math.floor(width * aspectRatio),
+            srcset:srcset,
+            type:format
+        }
+
+    }).catch( error => {throw Error(error)} )
+}
+
+
+
+const createSource = (srcset, type) => {
+    return `<source srcset="${srcset}" type="image/${type}">`
+}
+
 
 // TODO: 
-const createPicture = (src, alt) => {
-    return `<picture src="${src}" alt="${alt}" >`
-}
-*/
+// https://developer.mozilla.org/en-US/docs/Web/HTML/Element/picture
+// Picture Element is a way to art direct an image depending on size.
+// So the image may well entirely change depending on the screen size
+// It is *not* for showing the same picture in different sizes
+// HOWEVER, webP has only recently become cross browser so is still 
+// considered a cutting edge feature and so to program a fallback without
+// resorting to javascript you can use the source select inside <picture>
+// For showing webP images you have to use the picture element
+// and the sources tag to create fallbacks and overrides
+const createPicture = async function( src, alt='', types=[TYPE_WEBP,TYPE_JPG] ){
 
+    // first check the arguments are valid...
+    if (!src) 
+    {
+        throw Error("No src provided")
+        return
+    }
+
+    let width = 99999
+    let height = 99999
+
+    // get the dimensions of the original file...
+    // convert to jpeg if not a gif or a png or webp?
+    const sources = await Promise.all( types.map( async (type) => {
+        // create an image with various types inside
+        const sourceSet = await createSourceAttributes(src, 100, type)
+        if (sourceSet.width < width) 
+        {
+            width = sourceSet.width
+        }
+        if (sourceSet.height < height) 
+        {
+            height = sourceSet.height
+        }
+        return createSource(sourceSet.srcset, sourceSet.type)
+    }) )
+
+    // console.log(sources)
+
+    // create an image with various types inside
+    const picture = 
+    `<picture>
+        ${sources.join('\n')}
+        <img src="${path.normalize(src)}" alt="${alt}" width="${width}" height="${height}">
+    </picture>`
+
+    return picture
+}
+
+// Now an extra special feature!
+// Provide this with an IMG element (or img string)
+// and this method will convert it into a HiDPI src set
+const createSrcSetForIMG = (img) => {
+    // check to see if this is an IMGElement or a string
+    // 
+    if (typeof img === String)
+    {
+
+    }else{
+        // convert the element to a string
+    }
+}
+
+
+// one last handy method is using two or more terms of the url
+// in order to set the requested dimensions.
+
+// you could 
+// for example use the name of the folder a file lives in as the widths
+
+
+// Exports
 module.exports = {
     readFolder, 
     convertImage,
-    convertFolder
+    convertFolder,
+    createIMG, createPicture
 }
