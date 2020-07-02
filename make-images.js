@@ -150,16 +150,16 @@ const convertImage = async function(
             }
 
             // if a size is specified we use the new size otherwise we use the other size as reference
-            dimensions.width = dimensions.width ? dimensions.width * dimensions.size : metadata.width * dimensions.size
-            dimensions.height = dimensions.height ? dimensions.height * dimensions.size : metadata.height * dimensions.size
+            dimensions.width = dimensions.width ? Math.floor(dimensions.width * dimensions.size) : Math.floor(metadata.width * dimensions.size)
+            dimensions.height = dimensions.height ? Math.floor(dimensions.height * dimensions.size) : Math.floor(metadata.height * dimensions.size)
         }
         
         // console.error("dimensions",dimensions, 'hasBothDimensions',hasBothDimensions)
         const sharpOptions = {
 
             // set the dimensions
-            width:Math.floor(dimensions.width),
-            height:Math.floor(dimensions.height),
+            width:dimensions.width,
+            height:dimensions.height,
            
             // sharp.fit.cover: (default) Preserving aspect ratio, ensure the image covers both provided dimensions by cropping/clipping to fit.
             // sharp.fit.contain: Preserving aspect ratio, contain within both provided dimensions using "letterboxing" where necessary.
@@ -184,7 +184,7 @@ const convertImage = async function(
             background: options.background
         }
 
-        // console.error("dims",sizes[d], dimensions, sharpOptions)
+        console.error("dims",sizes[d], dimensions, sharpOptions)
         
         // resize the stream.clone()
         const resizedStream = await sharpStream.resize(sharpOptions)
