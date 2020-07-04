@@ -1,0 +1,45 @@
+html,body{
+    margin: 0;
+    padding: 0;
+    --margin:1rem;
+}
+
+ul,ol{
+
+    list-style:none;
+    margin:var(--margin);
+    padding:0;
+    display: grid;
+    grid-gap: var(--margin);
+}
+
+li{
+    list-style-type: none;
+}
+
+img{
+    max-width:100%;
+    height:auto;
+    display:block;
+}
+
+
+li.file a{
+    display:flex;
+    flex-direction: column;
+}
+
+li.file a img{
+    order:-1;
+}
+
+ul.sub-menu{
+    display:flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    margin:0;
+}
+
+ul.sub-menu li + li {
+    margin-left:var(--margin);
+}
