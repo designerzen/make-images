@@ -3,6 +3,7 @@ const TYPE_JPG = "jpg"
 const TYPE_WEBP = "webp"
 const TYPE_PNG = "png"
 const TYPE_GIF = "gif"
+const TYPES = [ TYPE_JPG, TYPE_PNG, TYPE_WEBP, TYPE_GIF ]
 
 // Libs
 const sharp = require("sharp")
@@ -78,12 +79,14 @@ const convertImage = async function(
     // use path tool in case the file name is in the wrong format...
     file = path.normalize(file)
 
-    const name = path.basename( file, path.extname(file) )
+    const extension = path.extname(file)
+    const name = path.basename( file, extension )
     const filePath = path.dirname(file)
 
     // create promises for all the variants and store them in here
     const promises = []
     const filenames = []
+    const formats = []
 
     // create the stream
     const sharpStream = sharp(file, {
@@ -101,6 +104,23 @@ const convertImage = async function(
         types = [metadata.format]
     }else if ( !Array.isArray(types) ){
         types = [types]
+    }
+
+    // ensure that the types are real and fit the expected schema
+    for ( const t in types ) 
+    {
+        const type = types[t].replace(".","").toLowerCase()
+        if ( TYPES.includes(type) )
+        {
+            formats.push( type )
+        }
+    }
+
+    // If there are still no formats, exit early here...
+    if (formats.length < 1)
+    {
+        // no formats to transcode to!
+        throw Error("No Formats specified in the right format", types)
     }
 
     // TODO: LOOP
@@ -196,9 +216,9 @@ const convertImage = async function(
         //console.log( "resizedStream : metadata", resizedMeta, "aspectRatio", aspectRatio, "dimensions", dimensions )
         
         // now loop through the types
-        for ( let t in types )
+        for ( const t in formats )
         {
-            const type = types[t].toLowerCase()
+            const type = formats[t]
             const filename = createFilename( name, resizedMeta.width, resizedMeta.height, type, dimensions.size)
             const destination = path.join( options.destination, filePath, filename )
             const resizedStreamClone = resizedStream.clone()        
@@ -211,12 +231,6 @@ const convertImage = async function(
                 case TYPE_WEBP:
                     promises.push( resizedStreamClone.webp(options).toFile(destination) )
                     break
-        
-                // just in case it is a really old jpeg!
-                case "jpeg":
-                case TYPE_JPG:
-                    promises.push( resizedStreamClone.jpeg(options).toFile(destination) )
-                    break
 
                 case TYPE_PNG:
                     promises.push( resizedStreamClone.png(options).toFile(destination) )
@@ -225,14 +239,30 @@ const convertImage = async function(
                 case TYPE_GIF:
                     promises.push( resizedStreamClone.gif(options).toFile(destination) )
                     break
+
+                // just in case it is a really old jpeg!
+                case "jpeg":
+                case TYPE_JPG:
+                    promises.push( resizedStreamClone.jpeg(options).toFile(destination) )
+                    break
             }
 
             //console.log(">", type, filename, promises[promises.length-1] )
         }  
 
     }
-    console.log( `Ready to encode`.green + ` `.green + ` ${sizes.length} sizes `.green.inverse  +  ` into `.green + ` ${types.length} type (${types.join(' & ')}) `.green.inverse + ` types, resulting in `.green + ` ${promises.length} new images `.green.inverse )
 
+    // make sure there are images to make or else give up
+    if (promises.length)
+    {
+        // good
+        console.log( `Ready to encode `.green + ` ${extension.toUpperCase()} `.green.inverse + ` in ` + ` ${sizes.length} sizes `.green.inverse  +  ` and `.green + ` ${formats.length} type(s) (${formats.join(' & ')}) `.green.inverse + ` types, resulting in `.green + ` ${promises.length} total new images `.green.inverse )
+
+    } else{
+        // bad data, nothing to do
+        console.log( `Nothing to encode`.red + ` `.red + ` ${sizes.length} sizes `.red.inverse  +  ` into `.red + ` ${formats.length} type (${formats.join(' & ')}) `.red.inverse + ` types, resulting in `.red + ` ${promises.length} new images `.red.inverse )
+    }
+    
     // Create a pipeline that will download an image, resize it and format it to different files
     // Using Promises to know when the pipeline is complete
     return Promise.all(promises)
